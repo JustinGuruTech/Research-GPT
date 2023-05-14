@@ -1,14 +1,27 @@
+import json
+from json import JSONEncoder
+from pathlib import WindowsPath, PosixPath
+from autogpt.contexts.contextualize import ContextManager
 from colorama import Fore, Style
 
 from autogpt.app import execute_command, get_command
 from autogpt.chat import chat_with_ai, create_chat_message
 from autogpt.config import Config
+from autogpt.dsl_parsing.dsl_parser import DSLParser
 from autogpt.json_utils.json_fix_llm import fix_json_using_multiple_techniques
+from autogpt.json_utils.json_fixer import JsonFixer
 from autogpt.json_utils.utilities import validate_json
 from autogpt.logs import logger, print_assistant_thoughts
 from autogpt.speech import say_text
 from autogpt.spinner import Spinner
 from autogpt.utils import clean_input
+
+class CustomJSONEncoder(JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (WindowsPath, PosixPath)):  # Check for both WindowsPath and PosixPath
+            return str(obj)
+        return super().default(obj)
+
 
 
 class Agent:
@@ -41,6 +54,7 @@ class Agent:
         next_action_count,
         system_prompt,
         triggering_prompt,
+        context_file=None,
     ):
         self.ai_name = ai_name
         self.memory = memory
@@ -48,6 +62,7 @@ class Agent:
         self.next_action_count = next_action_count
         self.system_prompt = system_prompt
         self.triggering_prompt = triggering_prompt
+        self.context_manager = ContextManager()
 
     def start_interaction_loop(self):
         # Interaction Loop
@@ -58,6 +73,7 @@ class Agent:
         user_input = ""
 
         while True:
+            print("Interaction loop running")
             # Discontinue if continuous limit is reached
             loop_count += 1
             if (
@@ -70,6 +86,15 @@ class Agent:
                 )
                 break
 
+            context_data = self.context_manager.get_current_context()
+            if context_data:
+                context_message = {
+                    "role": "system",
+                    # "contextNumber": self.context_manager.context_count,
+                    "content": json.dumps(context_data, cls=CustomJSONEncoder),
+                }
+                self.full_message_history.insert(0, context_message)
+
             # Send message to AI, get response
             with Spinner("Thinking... "):
                 assistant_reply = chat_with_ai(
@@ -79,6 +104,30 @@ class Agent:
                     self.memory,
                     cfg.fast_token_limit,
                 )  # TODO: This hardcodes the model to use GPT3.5. Make this an argument
+
+
+            # DEBUG COMMAND
+            # print(assistant_reply)
+
+            # Experimental DSL Parser
+            # Parse the DSL-formatted string using the DSLParser
+            # dsl_parser = DSLParser()
+            # braindump, command, key_updates = dsl_parser.parse(assistant_reply)
+
+            # assistant_reply_dict = {
+            #     "braindump": braindump,
+            #     "command": command,
+            #     "key_updates": key_updates,
+            # }
+
+            # # Convert the dictionary into a JSON string
+            # assistant_reply_json = json.dumps(assistant_reply_dict)
+            # assistant_reply_obj = json.loads(assistant_reply_json)
+
+            # DEBUG COMMANDS
+            # print("\nASSISTANT REPLY JSON\n")
+            # print(assistant_reply_json)
+            # print("\n")
 
             assistant_reply_json = fix_json_using_multiple_techniques(assistant_reply)
 
@@ -178,7 +227,7 @@ class Agent:
             memory_to_add = (
                 f"Assistant Reply: {assistant_reply} "
                 f"\nResult: {result} "
-                f"\nHuman Feedback: {user_input} "
+                f"\n---------- HUMAN FEEDBACK: {self.triggering_prompt} "
             )
 
             self.memory.add(memory_to_add)

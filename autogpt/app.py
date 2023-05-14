@@ -1,6 +1,7 @@
 """ Command and Control """
 import json
 from typing import Dict, List, NoReturn, Union
+from autogpt import memory
 
 from autogpt.agent.agent_manager import AgentManager
 from autogpt.commands.analyze_code import analyze_code
@@ -18,22 +19,28 @@ from autogpt.commands.file_operations import (
     search_files,
     write_to_file,
 )
-from autogpt.commands.git_operations import clone_repository
+from autogpt.commands.web_selenium import browse_website
+from autogpt.contexts.templates import TemplateManager
 from autogpt.commands.google_search import google_official_search, google_search
 from autogpt.commands.image_gen import generate_image
-from autogpt.commands.improve_code import improve_code
-from autogpt.commands.twitter import send_tweet
-from autogpt.commands.web_requests import scrape_links, scrape_text
-from autogpt.commands.web_selenium import browse_website
-from autogpt.commands.write_tests import write_tests
+from autogpt.commands.web_playwright import scrape_links, scrape_text
 from autogpt.config import Config
-from autogpt.json_utils.json_fix_llm import fix_and_parse_json
+from autogpt.contexts.contextualize import ContextManager
+from autogpt.json_fixes.parsing import fix_and_parse_json
 from autogpt.memory import get_memory
 from autogpt.processing.text import summarize_text
 from autogpt.speech import say_text
+from autogpt.commands.git_operations import clone_repository
+from autogpt.commands.twitter import send_tweet
+from autogpt.workspace import CONTEXTS_PATH
+from autogpt.prompt import all_commands
+
 
 CFG = Config()
 AGENT_MANAGER = AgentManager()
+context_template_file = CONTEXTS_PATH / "context_template.md"
+context_manager = ContextManager(CONTEXTS_PATH, context_template_file)
+template_manager = TemplateManager()
 
 
 def is_valid_int(value: str) -> bool:
@@ -120,6 +127,30 @@ def execute_command(command_name: str, arguments):
     """
     try:
         command_name = map_command_synonyms(command_name.lower())
+        # todo: unecessary pretty sure
+        # if command_name == "list_commands":
+        #     formatted_commands = "\n".join([f"\"{command_name}\": {args}" for _, command_name, args in all_commands])
+        #     return formatted_commands
+        # todo: work out multiple commands in one request
+        # if command_name == "command_sequence":
+        #     try:
+        #         commands = arguments["commands"]
+        #         if isinstance(commands, str):
+        #             commands = json.loads(commands)
+
+        #         results = []
+        #         for command in commands:
+        #             if isinstance(command, str):
+        #                 command = json.loads(command)
+        #             command_result = execute_command(command["name"], command["args"])
+        #             result_str = f"{command['name']} command result: {command_result}"
+        #             results.append(result_str)
+
+        #         return "\n".join(results)
+        #     except Exception as e:
+        #         return "command_sequence failed. Ensure you provide the commands in proper json with a name and the correct args"
+
+
         if command_name == "google":
             # Check if the Google API key is set and use the official search method
             # If the API key is not set or has only whitespaces, use the unofficial
@@ -140,10 +171,12 @@ def execute_command(command_name: str, arguments):
             else:
                 safe_message = google_result.encode("utf-8", "ignore")
 
-            return safe_message.decode("utf-8")
-        elif command_name == "memory_add":
-            memory = get_memory(CFG)
-            return memory.add(arguments["string"])
+            return str(safe_message)
+        elif command_name == "browse_website":
+            return browse_website(arguments["url"], arguments["question"])
+        
+        # AGENTS
+
         elif command_name == "start_agent":
             return start_agent(
                 arguments["name"], arguments["task"], arguments["prompt"]
@@ -154,6 +187,60 @@ def execute_command(command_name: str, arguments):
             return list_agents()
         elif command_name == "delete_agent":
             return delete_agent(arguments["key"])
+
+
+        # Templates
+        elif command_name == "list_templates": # LIST
+            template_manager = TemplateManager()
+            return template_manager.list_templates()
+        elif command_name == "read_template": # READ
+            template_name = arguments["name"]
+            template_manager = TemplateManager()
+            return template_manager.read_template(template_name)
+        elif command_name == "create_template": # CREATE
+            template_name = arguments["name"]
+            template_data = arguments["data"]
+            template_manager = TemplateManager()
+            return template_manager.create_template(template_name, template_data)
+        
+        # CONTEXTS
+
+        elif command_name == "list_contexts": # LIST
+            return context_manager.list_contexts()
+        elif command_name == "get_current_context": # CURRENT
+            return context_manager.get_current_context()
+        elif command_name == "create_context": # CREATE
+            context_name = arguments["name"]
+            context_data = arguments["data"]
+            return context_manager.create_new_context(context_name, context_data)
+        elif command_name == "evaluate_context": # EVALUATE
+            context_name = arguments["name"]
+            context_eval = arguments["data"]
+            return context_manager.evaluate_context_success(context_name, context_eval)
+        elif command_name == "close_context": # CLOSE
+            context_name = arguments["name"]
+            context_close_summary = arguments["data"]
+            return context_manager.close_context(context_name, context_close_summary)
+        elif command_name == "switch_context": # SWITCH
+            context_name = arguments["name"]
+            return context_manager.switch_context(context_name)
+
+        # Todo: Implement these, change args
+        elif command_name == "merge_contexts": # MERGE
+            context_name_1 = arguments["context_name_1"]
+            context_name_2 = arguments["context_name_2"]
+            merged_context_name = arguments["merged_context_name"]
+            merged_context_data = arguments["merged_context_data"]
+            context_manager.merge_contexts(context_name_1, context_name_2, merged_context_name, merged_context_data)
+        elif command_name == "update_context": # UPDATE
+            context_name = arguments["context_name"]
+            context_data = arguments["filled_template_markdown_data"]
+            return context_manager.update_context(context_name, context_data)
+        elif command_name == "get_context": # GET
+            context_name = arguments["context_name"]
+            return context_manager.get_context(context_name)
+
+        
         elif command_name == "get_text_summary":
             return get_text_summary(arguments["url"], arguments["question"])
         elif command_name == "get_hyperlinks":
@@ -172,56 +259,20 @@ def execute_command(command_name: str, arguments):
             return delete_file(arguments["file"])
         elif command_name == "search_files":
             return search_files(arguments["directory"])
-        elif command_name == "download_file":
-            if not CFG.allow_downloads:
-                return "Error: You do not have user authorization to download files locally."
-            return download_file(arguments["url"], arguments["file"])
-        elif command_name == "browse_website":
-            return browse_website(arguments["url"], arguments["question"])
-        # TODO: Change these to take in a file rather than pasted code, if
-        # non-file is given, return instructions "Input should be a python
-        # filepath, write your code to file and try again"
-        elif command_name == "analyze_code":
-            return analyze_code(arguments["code"])
-        elif command_name == "improve_code":
-            return improve_code(arguments["suggestions"], arguments["code"])
-        elif command_name == "write_tests":
-            return write_tests(arguments["code"], arguments.get("focus"))
-        elif command_name == "execute_python_file":  # Add this command
-            return execute_python_file(arguments["file"])
-        elif command_name == "execute_shell":
-            if CFG.execute_local_commands:
-                return execute_shell(arguments["command_line"])
-            else:
-                return (
-                    "You are not allowed to run local shell commands. To execute"
-                    " shell commands, EXECUTE_LOCAL_COMMANDS must be set to 'True' "
-                    "in your config. Do not attempt to bypass the restriction."
-                )
-        elif command_name == "execute_shell_popen":
-            if CFG.execute_local_commands:
-                return execute_shell_popen(arguments["command_line"])
-            else:
-                return (
-                    "You are not allowed to run local shell commands. To execute"
-                    " shell commands, EXECUTE_LOCAL_COMMANDS must be set to 'True' "
-                    "in your config. Do not attempt to bypass the restriction."
-                )
-        elif command_name == "read_audio_from_file":
-            return read_audio_from_file(arguments["file"])
+        
         elif command_name == "generate_image":
             return generate_image(arguments["prompt"])
-        elif command_name == "send_tweet":
-            return send_tweet(arguments["text"])
         elif command_name == "do_nothing":
             return "No action performed."
         elif command_name == "task_complete":
             shutdown()
+
+        elif command_name == "memory_add":
+            return memory.add(arguments["string"])
         else:
             return (
                 f"Unknown command '{command_name}'. Please refer to the 'COMMANDS'"
-                " list for available commands and only respond in the specified JSON"
-                " format."
+                " list for available commands and only respond in the specified JSON."
             )
     except Exception as e:
         return f"Error: {str(e)}"
@@ -259,6 +310,9 @@ def shutdown() -> NoReturn:
     print("Shutting down...")
     quit()
 
+
+
+# AGENT COMMANDS
 
 def start_agent(name: str, task: str, prompt: str, model=CFG.fast_llm_model) -> str:
     """Start an agent with a given name, task, and prompt

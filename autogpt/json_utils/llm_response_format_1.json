@@ -2,30 +2,31 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "type": "object",
     "properties": {
-        "thoughts": {
-            "type": "object",
-            "properties": {
-                "text": {"type": "string"},
-                "reasoning": {"type": "string"},
-                "plan": {"type": "string"},
-                "criticism": {"type": "string"},
-                "speak": {"type": "string"}
-            },
-            "required": ["text", "reasoning", "plan", "criticism", "speak"],
-            "additionalProperties": false
+        "braindump": {
+            "type": "string"
         },
         "command": {
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
-                "args": {
-                    "type": "object"
-                }
+                "args": {"type": "object"}
             },
             "required": ["name", "args"],
             "additionalProperties": false
+        },
+        "key_updates": {
+            "type": "object",
+            "properties": {
+                "essence": {"type": "string"},
+                "reasoning": {"type": "string"},
+                "plan": {"type": "string"},
+                "criticism": {"type": "string"},
+                "big_picture": {"type": "string"}
+            },
+            "required": ["essence", "reasoning", "plan", "criticism", "big_picture"],
+            "additionalProperties": false
         }
     },
-    "required": ["thoughts", "command"],
+    "required": ["braindump", "command", "key_updates"],
     "additionalProperties": false
 }
